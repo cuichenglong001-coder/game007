@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>打砖块</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: "Microsoft YaHei", sans-serif;
+    color: #eee;
+    user-select: none;
+  }
+  h1 { margin-bottom: 10px; font-size: 24px; }
+  #info {
+    width: 480px;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 16px;
+  }
+  canvas {
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 6px;
+    display: block;
+  }
+  #tip { margin-top: 10px; font-size: 13px; color: #888; }
+</style>
+</head>
+<body>
+<h1>打砖块</h1>
+<div id="info">
+  <span>得分: <b id="score">0</b></span>
+  <span>生命: <b id="lives">3</b></span>
+</div>
+<canvas id="game" width="480" height="400"></canvas>
+<div id="tip">← → 或鼠标移动挡板 ｜ 空格 开始 / 暂停 ｜ R 重新开始</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const livesEl = document.getElementById('lives');
+
+const W = canvas.width, H = canvas.height;
+const PADDLE_W = 80, PADDLE_H = 10, PADDLE_Y = H - 24;
+const BALL_R = 7;
+const BRICK_ROWS = 5, BRICK_COLS = 8;
+const BRICK_W = 52, BRICK_H = 18, BRICK_GAP = 6;
+const BRICK_TOP = 40;
+const BRICK_LEFT = (W - BRICK_COLS * (BRICK_W + BRICK_GAP) + BRICK_GAP) / 2;
+const ROW_COLORS = ['#e94560', '#ff9f45', '#ffd93d', '#6bcb77', '#4d96ff'];
+
+let paddle, ball, bricks, score, lives, running, gameOver, won;
+
+function init() {
+  paddle = { x: W / 2 - PADDLE_W / 2, w: PADDLE_W, h: PADDLE_H };
+  ball = { x: W / 2, y: PADDLE_Y - BALL_R - 1, dx: 3, dy: -3, speed: 4 };
+  normalizeBall();
+  bricks = [];
+  for (let r = 0; r < BRICK_ROWS; r++) {
+    for (let c = 0; c < BRICK_COLS; c++) {
+      bricks.push({
+        x: BRICK_LEFT + c * (BRICK_W + BRICK_GAP),
+        y: BRICK_TOP + r * (BRICK_H + BRICK_GAP),
+        alive: true,
+        color: ROW_COLORS[r]
+      });
+    }
+  }
+  score = 0; lives = 3;
+  running = false; gameOver = false; won = false;
+  scoreEl.textContent = score;
+  livesEl.textContent = lives;
+}
+
+function normalizeBall() {
+  const len = Math.hypot(ball.dx, ball.dy);
+  ball.dx = ball.dx / len * ball.speed;
+  ball.dy = ball.dy / len * ball.speed;
+}
+
+function resetBall() {
+  ball.x = paddle.x + paddle.w / 2;
+  ball.y = PADDLE_Y - BALL_R - 1;
+  ball.dx = (Math.random() > 0.5 ? 1 : -1) * 3;
+  ball.dy = -3;
+  normalizeBall();
+}
+
+function update() {
+  if (!running) return;
+
+  ball.x += ball.dx;
+  ball.y += ball.dy;
+
+  // 墙壁碰撞
+  if (ball.x < BALL_R) { ball.x = BALL_R; ball.dx = Math.abs(ball.dx); }
+  if (ball.x > W - BALL_R) { ball.x = W - BALL_R; ball.dx = -Math.abs(ball.dx); }
+  if (ball.y < BALL_R) { ball.y = BALL_R; ball.dy = Math.abs(ball.dy); }
+
+  // 挡板碰撞（根据击中位置改变反弹角度）
+  if (ball.dy > 0 &&
+      ball.y + BALL_R >= PADDLE_Y &&
+      ball.y - BALL_R <= PADDLE_Y + PADDLE_H &&
+      ball.x >= paddle.x && ball.x <= paddle.x + paddle.w) {
+    const hit = (ball.x - paddle.x) / paddle.w; // 0~1
+    const angle = (hit - 0.5) * Math.PI * 0.7;  // 最大约±63°
+    ball.dx = ball.speed * Math.sin(angle);
+    ball.dy = -ball.speed * Math.cos(angle);
+    ball.y = PADDLE_Y - BALL_R;
+  }
+
+  // 砖块碰撞
+  for (const b of bricks) {
+    if (!b.alive) continue;
+    if (ball.x + BALL_R > b.x && ball.x - BALL_R < b.x + BRICK_W &&
+        ball.y + BALL_R > b.y && ball.y - BALL_R < b.y + BRICK_H) {
+      b.alive = false;
+      score += 10;
+      scoreEl.textContent = score;
+      // 判断从哪一侧撞上
+      const overlapL = ball.x + BALL_R - b.x;
+      const overlapR = b.x + BRICK_W - (ball.x - BALL_R);
+      const overlapT = ball.y + BALL_R - b.y;
+      const overlapB = b.y + BRICK_H - (ball.y - BALL_R);
+      const min = Math.min(overlapL, overlapR, overlapT, overlapB);
+      if (min === overlapL || min === overlapR) ball.dx = -ball.dx;
+      else ball.dy = -ball.dy;
+      break;
+    }
+  }
+
+  // 胜利
+  if (bricks.every(b => !b.alive)) {
+    running = false; gameOver = true; won = true;
+  }
+
+  // 掉落
+  if (ball.y - BALL_R > H) {
+    lives--;
+    livesEl.textContent = lives;
+    if (lives <= 0) {
+      running = false; gameOver = true; won = false;
+    } else {
+      resetBall();
+      running = false;
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // 砖块
+  for (const b of bricks) {
+    if (!b.alive) continue;
+    ctx.fillStyle = b.color;
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, BRICK_W, BRICK_H, 4);
+    ctx.fill();
+  }
+
+  // 挡板
+  ctx.fillStyle = '#eee';
+  ctx.beginPath();
+  ctx.roundRect(paddle.x, PADDLE_Y, paddle.w, paddle.h, 5);
+  ctx.fill();
+
+  // 球
+  ctx.fillStyle = '#ffd93d';
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, BALL_R, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 提示文字
+  if (!running && !gameOver) {
+    drawText('按 空格 开始', W / 2, H / 2 + 60, '18px');
+  }
+  if (gameOver) {
+    drawText(won ? '🎉 你赢了！' : '游戏结束', W / 2, H / 2, '28px');
+    drawText('按 R 重新开始', W / 2, H / 2 + 40, '16px');
+  }
+}
+
+function drawText(text, x, y, size) {
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, y - parseInt(size), W, parseInt(size) * 2);
+  ctx.fillStyle = '#fff';
+  ctx.font = size + ' "Microsoft YaHei", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+}
+
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (e.key === ' ') {
+    e.preventDefault();
+    if (!gameOver) running = !running;
+  }
+  if (e.key === 'r' || e.key === 'R') init();
+});
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+canvas.addEventListener('mousemove', e => {
+  const rect = canvas.getBoundingClientRect();
+  paddle.x = e.clientX - rect.left - paddle.w / 2;
+  clampPaddle();
+});
+
+function clampPaddle() {
+  paddle.x = Math.max(0, Math.min(W - paddle.w, paddle.x));
+}
+
+function loop() {
+  if (running) {
+    if (keys['ArrowLeft'])  paddle.x -= 6;
+    if (keys['ArrowRight']) paddle.x += 6;
+    clampPaddle();
+  }
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+init();
+loop();
+</script>
+</body>
+</html>
